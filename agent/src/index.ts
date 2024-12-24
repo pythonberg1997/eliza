@@ -33,6 +33,7 @@ import createGoatPlugin from "@elizaos/plugin-goat";
 // import { intifacePlugin } from "@elizaos/plugin-intiface";
 import { DirectClient } from "@elizaos/client-direct";
 import { aptosPlugin } from "@elizaos/plugin-aptos";
+import { bscPlugin } from "@elizaos/plugin-bsc";
 import {
     advancedTradePlugin,
     coinbaseCommercePlugin,
@@ -504,6 +505,11 @@ export async function createAgent(
         // character.plugins are handled when clients are added
         plugins: [
             bootstrapPlugin,
+            getSecret(character, "BSC_PRIVATE_KEY") ||
+            (getSecret(character, "BSC_PUBLIC_KEY") &&
+                getSecret(character, "BSC_PUBLIC_KEY")?.startsWith("0x"))
+                ? bscPlugin
+                : null,
             getSecret(character, "CONFLUX_CORE_PRIVATE_KEY")
                 ? confluxPlugin
                 : null,
