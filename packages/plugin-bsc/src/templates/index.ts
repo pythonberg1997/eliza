@@ -33,7 +33,7 @@ Extract the following information about the requested transfer:
 - Recipient address. Must be a valid Ethereum address starting with "0x"
 - Data. Optional, data to be included in the transaction
 
-Respond with a JSON markdown block containing only the extracted values. All fields except 'token' are required:
+Respond with a JSON markdown block containing only the extracted values:
 
 \`\`\`json
 {
@@ -96,6 +96,26 @@ Respond with a JSON markdown block containing only the extracted values:
     "toToken": string | null,
     "amount": string,
     "toAddress": string | null
+}
+\`\`\`
+`;
+
+export const faucetTemplate = `Given the recent messages and wallet information below:
+
+{{recentMessages}}
+
+{{walletInfo}}
+
+Extract the following information about the requested faucet request:
+- Chain to execute on. Must be one of ["bscTestnet", "opBNBTestnet"]. Mainnet is not supported.
+- Recipient address. Must be a valid Ethereum address starting with "0x"
+
+Respond with a JSON markdown block containing only the extracted values. All fields are required:
+
+\`\`\`json
+{
+    "chain": "bscTestnet" | "opBNBTestnet",
+    "toAddress": string
 }
 \`\`\`
 `;

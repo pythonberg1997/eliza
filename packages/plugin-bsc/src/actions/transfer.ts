@@ -18,18 +18,15 @@ export { transferTemplate };
 
 // Exported for tests
 export class TransferAction {
-    private readonly BSC_DEFAULT_GAS_PRICE = 3000000000n as const; // 3 Gwei
+    private readonly DEFAULT_GAS_PRICE = 3000000000n as const; // 3 Gwei
+    private readonly TRANSFER_GAS = 21000n;
+
     constructor(private walletProvider: WalletProvider) {}
 
     async transfer(params: TransferParams): Promise<Transaction> {
         const fromAddress = this.walletProvider.getAddress();
 
-        if (!params.data) {
-            params.data = "0x";
-        }
-
         this.walletProvider.switchChain(params.chain);
-        const walletClient = this.walletProvider.getWalletClient(params.chain);
 
         try {
             const nativeToken =
@@ -38,7 +35,12 @@ export class TransferAction {
             let value: bigint;
             let hash: Hex;
             if (!params.token || params.token == nativeToken) {
+                // Native token transfer
+                let options: { gas?: bigint; gasPrice?: bigint; data?: Hex } = {
+                    data: params.data,
+                };
                 if (!params.amount) {
+                    // Transfer all balance minus gas
                     const balance = await this.walletProvider.getWalletBalance(
                         params.chain
                     );
@@ -46,33 +48,21 @@ export class TransferAction {
                         throw new Error("Failed to get wallet balance");
                     }
                     value =
-                        parseEther(balance) -
-                        this.BSC_DEFAULT_GAS_PRICE * 21000n;
-
-                    hash = await walletClient.sendTransaction({
-                        account: walletClient.account!,
-                        to: params.toAddress,
-                        value: value,
-                        gas: 21000n,
-                        gasPrice: this.BSC_DEFAULT_GAS_PRICE,
-                        data: params.data as Hex,
-                        chain: this.walletProvider.getChainConfigs(
-                            params.chain
-                        ),
-                    });
+                        parseEther(balance) - this.DEFAULT_GAS_PRICE * 21000n;
+                    options.gas = this.TRANSFER_GAS;
+                    options.gasPrice = this.DEFAULT_GAS_PRICE;
                 } else {
                     value = parseEther(params.amount);
-                    hash = await walletClient.sendTransaction({
-                        account: walletClient.account!,
-                        to: params.toAddress,
-                        value: value,
-                        data: params.data as Hex,
-                        chain: this.walletProvider.getChainConfigs(
-                            params.chain
-                        ),
-                    });
                 }
+
+                hash = await this.walletProvider.transfer(
+                    params.chain,
+                    params.toAddress,
+                    value,
+                    options
+                );
             } else {
+                // ERC20 token transfer
                 let tokenAddress = params.token;
                 if (!params.token.startsWith("0x")) {
                     const resolvedAddress =
@@ -88,10 +78,11 @@ export class TransferAction {
                     tokenAddress = resolvedAddress;
                 }
 
-                const publicClient = this.walletProvider.getPublicClient(
-                    params.chain
-                );
                 if (!params.amount) {
+                    // Transfer all balance
+                    const publicClient = this.walletProvider.getPublicClient(
+                        params.chain
+                    );
                     value = await publicClient.readContract({
                         address: tokenAddress as `0x${string}`,
                         abi: ERC20Abi,
@@ -102,15 +93,12 @@ export class TransferAction {
                     value = parseEther(params.amount);
                 }
 
-                const { request } = await publicClient.simulateContract({
-                    account: walletClient.account,
-                    address: tokenAddress as `0x${string}`,
-                    abi: ERC20Abi,
-                    functionName: "transfer",
-                    args: [params.toAddress as `0x${string}`, value],
-                });
-
-                hash = await walletClient.writeContract(request);
+                hash = await this.walletProvider.transferERC20(
+                    params.chain,
+                    tokenAddress as `0x${string}`,
+                    params.toAddress,
+                    value
+                );
             }
 
             return {

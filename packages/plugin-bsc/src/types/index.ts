@@ -49,6 +49,11 @@ export interface BridgeParams {
     toAddress?: Address;
 }
 
+export interface FaucetParams {
+    chain: SupportedChain;
+    toAddress: Address;
+}
+
 export const ERC20Abi = [
     {
         type: "constructor",
