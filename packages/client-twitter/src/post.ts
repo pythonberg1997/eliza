@@ -202,9 +202,14 @@ export class TwitterPostClient {
             await this.generateNewTweet();
         }
 
-        // Only start tweet generation loop if not in dry run mode
-        if (!this.isDryRun) {
-            generateNewTweetLoop();
+        // Only start tweet generation loop if not in dry run mode and enabled in configuration
+        if (this.client.twitterConfig.ENABLE_GENERATE_NEW_TWEET && !this.isDryRun) {
+            generateNewTweetLoop().catch((error) => {
+                elizaLogger.error(
+                    "Fatal error in generate new tweet loop:",
+                    error
+                );
+            });
             elizaLogger.log("Tweet generation loop started");
         } else {
             elizaLogger.log("Tweet generation loop disabled (dry run mode)");
@@ -808,7 +813,7 @@ export class TwitterPostClient {
                                     template:
                                         this.runtime.character.templates
                                             ?.twitterMessageHandlerTemplate ||
-                                        twitterMessageHandlerTemplate,
+                                        twitterMessageHandlerTemplate(false),
                                 });
 
                             if (!quoteContent) {
@@ -1004,7 +1009,7 @@ export class TwitterPostClient {
                 template:
                     this.runtime.character.templates
                         ?.twitterMessageHandlerTemplate ||
-                    twitterMessageHandlerTemplate,
+                    twitterMessageHandlerTemplate(false),
             });
 
             if (!replyText) {

@@ -49,6 +49,7 @@ export const twitterEnvSchema = z.object({
     POST_INTERVAL_MIN: z.number().int(),
     POST_INTERVAL_MAX: z.number().int(),
     ENABLE_ACTION_PROCESSING: z.boolean(),
+    ENABLE_GENERATE_NEW_TWEET: z.boolean(),
     ACTION_INTERVAL: z.number().int(),
     POST_IMMEDIATELY: z.boolean(),
 });

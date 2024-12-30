@@ -236,7 +236,7 @@ export class ClientBase extends EventEmitter {
         }
 
         await this.loadLatestCheckedTweetId();
-        await this.populateTimeline();
+        // await this.populateTimeline();
     }
 
     async fetchOwnPosts(count: number): Promise<Tweet[]> {
