@@ -2,16 +2,6 @@ import type { Address, Hash } from "viem";
 
 export type SupportedChain = "bsc" | "bscTestnet" | "opBNB" | "opBNBTestnet";
 
-// Transaction types
-export interface Transaction {
-    hash: Hash;
-    from: Address;
-    to: Address;
-    value: bigint;
-    data?: `0x${string}`;
-    chainId?: number;
-}
-
 export interface Balance {
     token: string;
     balance: string;
@@ -20,7 +10,7 @@ export interface Balance {
 // Action parameters
 export interface GetBalanceParams {
     chain: SupportedChain;
-    address: Address;
+    address?: Address;
     token?: string;
 }
 
@@ -49,6 +39,41 @@ export interface BridgeParams {
     toAddress?: Address;
 }
 
+// Action return types
+export interface GetBalanceResponse {
+    chain: SupportedChain;
+    address: Address;
+    balances: Balance[];
+}
+
+export interface TransferResponse {
+    chain: SupportedChain;
+    txHash: Hash;
+    recipient: Address;
+    amount: string;
+    token: string;
+    data?: `0x${string}`;
+}
+
+export interface SwapResponse {
+    chain: SupportedChain;
+    txHash: Hash;
+    fromToken: string;
+    toToken: string;
+    amount: string;
+}
+
+export interface BridgeResponse {
+    fromChain: SupportedChain;
+    toChain: SupportedChain;
+    txHash: Hash;
+    recipient: Address;
+    fromToken: string;
+    toToken: string;
+    amount: string;
+}
+
+// Contract ABIs
 export const ERC20Abi = [
     {
         type: "constructor",

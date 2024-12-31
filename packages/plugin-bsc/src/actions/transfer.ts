@@ -12,7 +12,7 @@ import { formatEther, parseEther, type Hex } from "viem";
 
 import { initWalletProvider, WalletProvider } from "../providers/wallet";
 import { transferTemplate } from "../templates";
-import { ERC20Abi, type Transaction, type TransferParams } from "../types";
+import { ERC20Abi, type TransferParams, type TransferResponse } from "../types";
 
 export { transferTemplate };
 
@@ -21,7 +21,7 @@ export class TransferAction {
     private readonly BSC_DEFAULT_GAS_PRICE = 3000000000n as const; // 3 Gwei
     constructor(private walletProvider: WalletProvider) {}
 
-    async transfer(params: TransferParams): Promise<Transaction> {
+    async transfer(params: TransferParams): Promise<TransferResponse> {
         const fromAddress = this.walletProvider.getAddress();
 
         if (!params.data) {
@@ -35,9 +35,16 @@ export class TransferAction {
             const nativeToken =
                 this.walletProvider.chains[params.chain].nativeCurrency.symbol;
 
-            let value: bigint;
-            let hash: Hex;
+            let resp: TransferResponse = {
+                chain: params.chain,
+                txHash: "0x",
+                recipient: params.toAddress,
+                amount: "",
+                token: params.token ?? nativeToken,
+            };
+
             if (!params.token || params.token == nativeToken) {
+                // Native token transfer
                 if (!params.amount) {
                     const balance = await this.walletProvider.getWalletBalance(
                         params.chain
@@ -45,11 +52,11 @@ export class TransferAction {
                     if (!balance) {
                         throw new Error("Failed to get wallet balance");
                     }
-                    value =
+                    const value =
                         parseEther(balance) -
                         this.BSC_DEFAULT_GAS_PRICE * 21000n;
 
-                    hash = await walletClient.sendTransaction({
+                    const hash = await walletClient.sendTransaction({
                         account: walletClient.account!,
                         to: params.toAddress,
                         value: value,
@@ -60,9 +67,12 @@ export class TransferAction {
                             params.chain
                         ),
                     });
+
+                    resp.txHash = hash;
+                    resp.amount = formatEther(value);
                 } else {
-                    value = parseEther(params.amount);
-                    hash = await walletClient.sendTransaction({
+                    const value = parseEther(params.amount);
+                    const hash = await walletClient.sendTransaction({
                         account: walletClient.account!,
                         to: params.toAddress,
                         value: value,
@@ -71,8 +81,12 @@ export class TransferAction {
                             params.chain
                         ),
                     });
+
+                    resp.txHash = hash;
+                    resp.amount = formatEther(value);
                 }
             } else {
+                // ERC20 token transfer
                 let tokenAddress = params.token;
                 if (!params.token.startsWith("0x")) {
                     const resolvedAddress =
@@ -91,6 +105,8 @@ export class TransferAction {
                 const publicClient = this.walletProvider.getPublicClient(
                     params.chain
                 );
+
+                let value: bigint;
                 if (!params.amount) {
                     value = await publicClient.readContract({
                         address: tokenAddress as `0x${string}`,
@@ -110,16 +126,13 @@ export class TransferAction {
                     args: [params.toAddress as `0x${string}`, value],
                 });
 
-                hash = await walletClient.writeContract(request);
+                const hash = await walletClient.writeContract(request);
+
+                resp.txHash = hash;
+                resp.amount = formatEther(value);
             }
 
-            return {
-                hash,
-                from: fromAddress,
-                to: params.toAddress,
-                value: value,
-                data: params.data as Hex,
-            };
+            return resp;
         } catch (error) {
             throw new Error(`Transfer failed: ${error.message}`);
         }
@@ -131,14 +144,28 @@ export const transferAction = {
     description: "Transfer tokens between addresses on the same chain",
     handler: async (
         runtime: IAgentRuntime,
-        _message: Memory,
+        message: Memory,
         state: State,
         _options: any,
         callback?: HandlerCallback
     ) => {
-        elizaLogger.log("Transfer action handler called");
-        const walletProvider = initWalletProvider(runtime);
-        const action = new TransferAction(walletProvider);
+        elizaLogger.log("Starting transfer action...");
+
+        // Validate transfer
+        if (!(message.content.source === "direct")) {
+            callback?.({
+                text: "I can't do that for you.",
+                content: { error: "Transfer not allowed" },
+            });
+            return false;
+        }
+
+        // Initialize or update state
+        if (!state) {
+            state = (await runtime.composeState(message)) as State;
+        } else {
+            state = await runtime.updateRecentMessageState(state);
+        }
 
         // Compose transfer context
         const transferContext = composeContext({
@@ -159,32 +186,22 @@ export const transferAction = {
             data: content.data,
         };
 
+        const walletProvider = initWalletProvider(runtime);
+        const action = new TransferAction(walletProvider);
         try {
             const transferResp = await action.transfer(paramOptions);
-            const tokenText = paramOptions.token
-                ? `${paramOptions.token} tokens`
-                : "BNB";
-            if (callback) {
-                callback({
-                    text: `Successfully transferred ${transferResp.value} ${tokenText} to ${paramOptions.toAddress}\nTransaction Hash: ${transferResp.hash}`,
-                    content: {
-                        success: true,
-                        hash: transferResp.hash,
-                        amount: formatEther(transferResp.value),
-                        recipient: transferResp.to,
-                        chain: content.fromChain,
-                    },
-                });
-            }
+            callback?.({
+                text: `Successfully transferred ${transferResp.amount} ${transferResp.token} to ${transferResp.recipient}\nTransaction Hash: ${transferResp.txHash}`,
+                content: { ...transferResp },
+            });
+
             return true;
         } catch (error) {
-            console.error("Error during token transfer:", error);
-            if (callback) {
-                callback({
-                    text: `Error transferring tokens: ${error.message}`,
-                    content: { error: error.message },
-                });
-            }
+            elizaLogger.error("Error during transfer:", error);
+            callback?.({
+                text: `Transfer failed`,
+                content: { error: error.message },
+            });
             return false;
         }
     },

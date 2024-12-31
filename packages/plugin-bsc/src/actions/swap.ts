@@ -2,6 +2,7 @@ import {
     composeContext,
     elizaLogger,
     generateObjectDeprecated,
+    HandlerCallback,
     ModelClass,
     type IAgentRuntime,
     type Memory,
@@ -12,14 +13,14 @@ import { Chain, createWalletClient, parseEther, http } from "viem";
 
 import { initWalletProvider, WalletProvider } from "../providers/wallet";
 import { swapTemplate } from "../templates";
-import type { SwapParams, Transaction } from "../types";
+import type { SwapParams, SwapResponse } from "../types";
 
 export { swapTemplate };
 
 export class SwapAction {
     constructor(private walletProvider: WalletProvider) {}
 
-    async swap(params: SwapParams): Promise<Transaction> {
+    async swap(params: SwapParams): Promise<SwapResponse> {
         if (params.chain == "bscTestnet") {
             throw new Error("Testnet is not supported");
         }
@@ -29,54 +30,61 @@ export class SwapAction {
 
         const chains = Object.values(this.walletProvider.chains);
         const walletClient = this.walletProvider.getWalletClient(params.chain);
-        createConfig({
-            integrator: "eliza",
-            providers: [
-                EVM({
-                    getWalletClient: async () => walletClient,
-                    switchChain: async (chainId) =>
-                        createWalletClient({
-                            account: this.walletProvider.account,
-                            chain: chains.find(
-                                (chain) => chain.id == chainId
-                            ) as Chain,
-                            transport: http(),
-                        }),
-                }),
-            ],
-        });
 
-        const routes = await getRoutes({
-            fromChainId: chainId,
-            toChainId: chainId,
-            fromTokenAddress: params.fromToken,
-            toTokenAddress: params.toToken,
-            fromAmount: parseEther(params.amount).toString(),
-            fromAddress: fromAddress,
-            options: {
-                slippage: params.slippage,
-                order: "RECOMMENDED",
-            },
-        });
+        try {
+            let resp: SwapResponse = {
+                chain: params.chain,
+                txHash: "0x",
+                fromToken: params.fromToken,
+                toToken: params.toToken,
+                amount: params.amount,
+            };
 
-        if (!routes.routes.length) throw new Error("No routes found");
+            createConfig({
+                integrator: "eliza",
+                providers: [
+                    EVM({
+                        getWalletClient: async () => walletClient,
+                        switchChain: async (chainId) =>
+                            createWalletClient({
+                                account: this.walletProvider.account,
+                                chain: chains.find(
+                                    (chain) => chain.id == chainId
+                                ) as Chain,
+                                transport: http(),
+                            }),
+                    }),
+                ],
+            });
 
-        const execution = await executeRoute(routes.routes[0]);
-        const process = execution.steps[0]?.execution?.process[0];
+            const routes = await getRoutes({
+                fromChainId: chainId,
+                toChainId: chainId,
+                fromTokenAddress: params.fromToken,
+                toTokenAddress: params.toToken,
+                fromAmount: parseEther(params.amount).toString(),
+                fromAddress: fromAddress,
+                options: {
+                    slippage: params.slippage,
+                    order: "RECOMMENDED",
+                },
+            });
 
-        if (!process?.status || process.status === "FAILED") {
-            throw new Error("Transaction failed");
+            if (!routes.routes.length) throw new Error("No routes found");
+
+            const execution = await executeRoute(routes.routes[0]);
+            const process = execution.steps[0]?.execution?.process[0];
+
+            if (!process?.status || process.status === "FAILED") {
+                throw new Error("Transaction failed");
+            }
+
+            resp.txHash = process.txHash as `0x${string}`;
+
+            return resp;
+        } catch (error) {
+            throw new Error(`Swap failed: ${error.message}`);
         }
-
-        return {
-            hash: process.txHash as `0x${string}`,
-            from: fromAddress,
-            to: routes.routes[0].steps[0].estimate
-                .approvalAddress as `0x${string}`,
-            value: 0n,
-            data: process.data as `0x${string}`,
-            chainId: chainId,
-        };
     }
 }
 
@@ -85,14 +93,19 @@ export const swapAction = {
     description: "Swap tokens on the same chain",
     handler: async (
         runtime: IAgentRuntime,
-        _message: Memory,
+        message: Memory,
         state: State,
         _options: any,
-        callback?: any
+        callback?: HandlerCallback
     ) => {
-        elizaLogger.log("Swap action handler called");
-        const walletProvider = initWalletProvider(runtime);
-        const action = new SwapAction(walletProvider);
+        elizaLogger.log("Starting swap action...");
+
+        // Initialize or update state
+        if (!state) {
+            state = (await runtime.composeState(message)) as State;
+        } else {
+            state = await runtime.updateRecentMessageState(state);
+        }
 
         // Compose swap context
         const swapContext = composeContext({
@@ -113,25 +126,21 @@ export const swapAction = {
             slippage: content.slippage,
         };
 
+        const walletProvider = initWalletProvider(runtime);
+        const action = new SwapAction(walletProvider);
         try {
             const swapResp = await action.swap(swapOptions);
-            if (callback) {
-                callback({
-                    text: `Successfully swap ${swapOptions.amount} ${swapOptions.fromToken} tokens to ${swapOptions.toToken}\nTransaction Hash: ${swapResp.hash}`,
-                    content: {
-                        success: true,
-                        hash: swapResp.hash,
-                        recipient: swapResp.to,
-                        chain: content.chain,
-                    },
-                });
-            }
+            callback?.({
+                text: `Successfully swap ${swapResp.amount} ${swapResp.fromToken} tokens to ${swapResp.toToken}\nTransaction Hash: ${swapResp.txHash}`,
+                content: { ...swapResp },
+            });
             return true;
         } catch (error) {
-            console.error("Error in swap handler:", error.message);
-            if (callback) {
-                callback({ text: `Error: ${error.message}` });
-            }
+            elizaLogger.error("Error during swap:", error.message);
+            callback?.({
+                text: `Swap failed`,
+                content: { error: error.message },
+            });
             return false;
         }
     },

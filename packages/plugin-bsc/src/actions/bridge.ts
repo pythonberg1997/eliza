@@ -16,8 +16,8 @@ import {
     ERC20Abi,
     L1StandardBridgeAbi,
     L2StandardBridgeAbi,
-    type Transaction,
     type BridgeParams,
+    type BridgeResponse,
     type SupportedChain,
 } from "../types";
 
@@ -35,7 +35,7 @@ export class BridgeAction {
 
     constructor(private walletProvider: WalletProvider) {}
 
-    async bridge(params: BridgeParams): Promise<Transaction> {
+    async bridge(params: BridgeParams): Promise<BridgeResponse> {
         const fromAddress = this.walletProvider.getAddress();
 
         this.walletProvider.switchChain(params.fromChain);
@@ -47,17 +47,30 @@ export class BridgeAction {
         );
 
         try {
-            let hash: Hex;
-            let contract: Address;
-            let value = parseEther(params.amount);
+            const nativeToken =
+                this.walletProvider.chains[params.fromChain].nativeCurrency
+                    .symbol;
+
+            let resp: BridgeResponse = {
+                fromChain: params.fromChain,
+                toChain: params.toChain,
+                txHash: "0x",
+                recipient: params.toAddress ?? fromAddress,
+                amount: params.amount,
+                fromToken: params.fromToken ?? nativeToken,
+                toToken: params.toToken ?? nativeToken,
+            };
 
             const account = walletClient.account!;
             const chain = this.walletProvider.getChainConfigs(params.fromChain);
 
             const selfBridge =
                 !params.toAddress || params.toAddress == fromAddress;
-            const nativeTokenBridge = !params.fromToken;
+            const nativeTokenBridge =
+                !params.fromToken || params.fromToken == nativeToken;
 
+            let hash: Hex;
+            const amount = parseEther(params.amount);
             if (params.fromChain == "bsc" && params.toChain == "opBNB") {
                 // from L1 to L2
                 const l1BridgeContract = getContract({
@@ -68,7 +81,6 @@ export class BridgeAction {
                         wallet: walletClient,
                     },
                 });
-                contract = this.L1_BRIDGE_ADDRESS;
 
                 // check ERC20 allowance
                 if (!nativeTokenBridge) {
@@ -77,7 +89,7 @@ export class BridgeAction {
                         params.fromToken!,
                         fromAddress,
                         this.L1_BRIDGE_ADDRESS,
-                        value
+                        amount
                     );
                 }
 
@@ -87,13 +99,13 @@ export class BridgeAction {
                     hash = await l1BridgeContract.write.depositETH(args, {
                         account,
                         chain,
-                        value,
+                        amount,
                     });
                 } else if (selfBridge && !nativeTokenBridge) {
                     const args = [
                         params.fromToken!,
                         params.toToken!,
-                        value,
+                        amount,
                         1,
                         "0x",
                     ] as const;
@@ -102,21 +114,20 @@ export class BridgeAction {
                         account,
                         chain,
                     });
-                    value = 0n;
                 } else if (!selfBridge && nativeTokenBridge) {
                     const args = [params.toAddress!, 1, "0x"] as const;
                     await l1BridgeContract.simulate.depositETHTo(args);
                     hash = await l1BridgeContract.write.depositETHTo(args, {
                         account,
                         chain,
-                        value,
+                        amount,
                     });
                 } else {
                     const args = [
                         params.fromToken!,
                         params.toToken!,
                         params.toAddress!,
-                        value,
+                        amount,
                         1,
                         "0x",
                     ] as const;
@@ -125,7 +136,6 @@ export class BridgeAction {
                         account,
                         chain,
                     });
-                    value = 0n;
                 }
             } else if (params.fromChain == "opBNB" && params.toChain == "bsc") {
                 // from L2 to L1
@@ -137,7 +147,6 @@ export class BridgeAction {
                         wallet: walletClient,
                     },
                 });
-                contract = this.L2_BRIDGE_ADDRESS;
 
                 // check ERC20 allowance
                 if (!nativeTokenBridge) {
@@ -146,18 +155,18 @@ export class BridgeAction {
                         params.fromToken!,
                         fromAddress,
                         this.L2_BRIDGE_ADDRESS,
-                        value
+                        amount
                     );
                 }
 
                 if (selfBridge && nativeTokenBridge) {
                     const args = [
                         this.LEGACY_ERC20_ETH,
-                        value,
+                        amount,
                         1,
                         "0x",
                     ] as const;
-                    value = value + this.L2_DELEGATION_FEE;
+                    const value = amount + this.L2_DELEGATION_FEE;
                     await l2BridgeContract.simulate.withdraw(args, { value });
                     hash = await l2BridgeContract.write.withdraw(args, {
                         account,
@@ -165,8 +174,8 @@ export class BridgeAction {
                         value,
                     });
                 } else if (selfBridge && !nativeTokenBridge) {
-                    const args = [params.fromToken!, value, 1, "0x"] as const;
-                    value = value + this.L2_DELEGATION_FEE;
+                    const args = [params.fromToken!, amount, 1, "0x"] as const;
+                    const value = this.L2_DELEGATION_FEE;
                     await l2BridgeContract.simulate.withdraw(args, { value });
                     hash = await l2BridgeContract.write.withdraw(args, {
                         account,
@@ -177,11 +186,11 @@ export class BridgeAction {
                     const args = [
                         this.LEGACY_ERC20_ETH,
                         params.toAddress!,
-                        value,
+                        amount,
                         1,
                         "0x",
                     ] as const;
-                    value = value + this.L2_DELEGATION_FEE;
+                    const value = amount + this.L2_DELEGATION_FEE;
                     await l2BridgeContract.simulate.withdrawTo(args, { value });
                     hash = await l2BridgeContract.write.withdrawTo(args, {
                         account,
@@ -192,11 +201,11 @@ export class BridgeAction {
                     const args = [
                         params.fromToken!,
                         params.toAddress!,
-                        value,
+                        amount,
                         1,
                         "0x",
                     ] as const;
-                    value = this.L2_DELEGATION_FEE;
+                    const value = this.L2_DELEGATION_FEE;
                     await l2BridgeContract.simulate.withdrawTo(args, { value });
                     hash = await l2BridgeContract.write.withdrawTo(args, {
                         account,
@@ -204,19 +213,15 @@ export class BridgeAction {
                         value,
                     });
                 }
+
+                resp.txHash = hash;
             } else {
                 throw new Error("Unsupported bridge direction");
             }
 
-            return {
-                hash,
-                from: fromAddress,
-                to: contract,
-                value,
-            };
+            return resp;
         } catch (error) {
-            console.error("Error during token bridge:", error);
-            throw error;
+            throw new Error(`Bridge failed: ${error.message}`);
         }
     }
 
@@ -256,14 +261,19 @@ export const bridgeAction = {
     description: "Bridge tokens between chains",
     handler: async (
         runtime: IAgentRuntime,
-        _message: Memory,
+        message: Memory,
         state: State,
         _options: any,
         callback?: HandlerCallback
     ) => {
-        elizaLogger.log("Bridge action handler called");
-        const walletProvider = initWalletProvider(runtime);
-        const action = new BridgeAction(walletProvider);
+        elizaLogger.log("Starting bridge action...");
+
+        // Initialize or update state
+        if (!state) {
+            state = (await runtime.composeState(message)) as State;
+        } else {
+            state = await runtime.updateRecentMessageState(state);
+        }
 
         // Compose bridge context
         const bridgeContext = composeContext({
@@ -285,35 +295,21 @@ export const bridgeAction = {
             toAddress: content.toAddress,
         };
 
+        const walletProvider = initWalletProvider(runtime);
+        const action = new BridgeAction(walletProvider);
         try {
             const bridgeResp = await action.bridge(paramOptions);
-            if (callback) {
-                const tokenText = paramOptions.fromToken
-                    ? `${paramOptions.fromToken} tokens`
-                    : "BNB";
-                const toAddressText = paramOptions.toAddress
-                    ? `to ${paramOptions.toAddress} `
-                    : "";
-                callback({
-                    text: `Successfully bridged ${paramOptions.amount} ${tokenText} ${toAddressText}from ${content.fromChain} to ${content.toChain}\nTransaction Hash: ${bridgeResp.hash}`,
-                    content: {
-                        success: true,
-                        hash: bridgeResp.hash,
-                        amount: formatEther(content.amount),
-                        recipient: bridgeResp.to,
-                        chain: content.fromChain,
-                    },
-                });
-            }
+            callback?.({
+                text: `Successfully bridged ${bridgeResp.amount} ${bridgeResp.fromToken} from ${bridgeResp.fromChain} to ${bridgeResp.toChain}\nTransaction Hash: ${bridgeResp.txHash}`,
+                content: { ...bridgeResp },
+            });
             return true;
         } catch (error) {
-            console.error("Error during token bridge:", error);
-            if (callback) {
-                callback({
-                    text: `Error during token bridge: ${error.message}`,
-                    content: { error: error.message },
-                });
-            }
+            elizaLogger.error("Error during token bridge:", error);
+            callback?.({
+                text: `Bridge failed`,
+                content: { error: error.message },
+            });
             return false;
         }
     },

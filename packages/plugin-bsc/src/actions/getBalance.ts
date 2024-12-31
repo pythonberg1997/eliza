@@ -2,6 +2,7 @@ import {
     composeContext,
     elizaLogger,
     generateObjectDeprecated,
+    HandlerCallback,
     ModelClass,
     type IAgentRuntime,
     type Memory,
@@ -17,7 +18,7 @@ import {
 
 import { initWalletProvider, WalletProvider } from "../providers/wallet";
 import { getBalanceTemplate } from "../templates";
-import type { Balance, GetBalanceParams } from "../types";
+import type { Balance, GetBalanceParams, GetBalanceResponse } from "../types";
 import { Address, formatEther, formatUnits } from "viem";
 
 export { getBalanceTemplate };
@@ -25,10 +26,15 @@ export { getBalanceTemplate };
 export class GetBalanceAction {
     constructor(private walletProvider: WalletProvider) {}
 
-    async getBalance(params: GetBalanceParams): Promise<Balance[]> {
-        const { chain, address, token } = params;
+    async getBalance(params: GetBalanceParams): Promise<GetBalanceResponse> {
+        let { chain, address, token } = params;
+
         if (chain == "bscTestnet") {
             throw new Error("Testnet is not supported");
+        }
+
+        if (!address) {
+            address = this.walletProvider.getAddress();
         }
 
         this.walletProvider.switchChain(chain);
@@ -36,24 +42,48 @@ export class GetBalanceAction {
             this.walletProvider.getChainConfigs(chain).nativeCurrency.symbol;
         const chainId = this.walletProvider.getChainConfigs(chain).id;
 
-        // If specific token is requested and it's not the native token
-        if (token && token !== nativeSymbol) {
-            const balance = await this.getTokenBalance(chainId, address, token);
-            return [{ token, balance }];
-        }
+        try {
+            // If specific token is requested and it's not the native token
+            if (token && token !== nativeSymbol) {
+                const balance = await this.getTokenBalance(
+                    chainId,
+                    address,
+                    token
+                );
+                return {
+                    chain,
+                    address,
+                    balances: [{ token, balance }],
+                };
+            }
 
-        // If no specific token is requested, get all token balances
-        if (!token) {
-            return this.getTokenBalances(chainId, address);
-        }
+            // If no specific token is requested, get all token balances
+            if (!token) {
+                const balances = await this.getTokenBalances(chainId, address);
+                return {
+                    chain,
+                    address,
+                    balances,
+                };
+            }
 
-        // If native token is requested
-        const nativeBalanceWei = await this.walletProvider
-            .getPublicClient(chain)
-            .getBalance({ address });
-        return [
-            { token: nativeSymbol, balance: formatEther(nativeBalanceWei) },
-        ];
+            // If native token is requested
+            const nativeBalanceWei = await this.walletProvider
+                .getPublicClient(chain)
+                .getBalance({ address });
+            return {
+                chain,
+                address,
+                balances: [
+                    {
+                        token: nativeSymbol,
+                        balance: formatEther(nativeBalanceWei),
+                    },
+                ],
+            };
+        } catch (error) {
+            throw new Error(`Get balance failed: ${error.message}`);
+        }
     }
 
     async getTokenBalance(
@@ -88,14 +118,19 @@ export const getBalanceAction = {
     description: "Get balance of a token or all tokens for the given address",
     handler: async (
         runtime: IAgentRuntime,
-        _message: Memory,
+        message: Memory,
         state: State,
         _options: any,
-        callback?: any
+        callback?: HandlerCallback
     ) => {
-        elizaLogger.log("GetBalance action handler called");
-        const walletProvider = initWalletProvider(runtime);
-        const action = new GetBalanceAction(walletProvider);
+        elizaLogger.log("Starting getBalance action...");
+
+        // Initialize or update state
+        if (!state) {
+            state = (await runtime.composeState(message)) as State;
+        } else {
+            state = await runtime.updateRecentMessageState(state);
+        }
 
         // Compose swap context
         const getBalanceContext = composeContext({
@@ -108,40 +143,35 @@ export const getBalanceAction = {
             modelClass: ModelClass.LARGE,
         });
 
-        if (!content.address) {
-            content.address = walletProvider.getAddress();
-        }
-
         const getBalanceOptions: GetBalanceParams = {
             chain: content.chain,
             address: content.address,
             token: content.token,
         };
 
+        const walletProvider = initWalletProvider(runtime);
+        const action = new GetBalanceAction(walletProvider);
         try {
             const getBalanceResp = await action.getBalance(getBalanceOptions);
             if (callback) {
                 let text = `No balance found for ${getBalanceOptions.address} on ${getBalanceOptions.chain}`;
-                if (getBalanceResp.length > 0) {
-                    text = `Balance of ${getBalanceOptions.address} on ${getBalanceOptions.chain}:\n${getBalanceResp
-                        .map(({ token, balance }) => `${balance} ${token}`)
+                if (getBalanceResp.balances.length > 0) {
+                    text = `Balance of ${getBalanceResp.address} on ${getBalanceResp.chain}:\n${getBalanceResp.balances
+                        .map(({ token, balance }) => `${token}: ${balance}`)
                         .join("\n")}`;
                 }
                 callback({
                     text,
-                    content: {
-                        success: true,
-                        balances: getBalanceResp,
-                        chain: content.chain,
-                    },
+                    content: { ...getBalanceResp },
                 });
             }
             return true;
         } catch (error) {
-            console.error("Error in getBalance handler:", error.message);
-            if (callback) {
-                callback({ text: `Error: ${error.message}` });
-            }
+            elizaLogger.error("Error in get balance:", error.message);
+            callback?.({
+                text: `Getting balance failed`,
+                content: { error: error.message },
+            });
             return false;
         }
     },
