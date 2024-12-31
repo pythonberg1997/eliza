@@ -8,7 +8,13 @@ import {
     type Memory,
     type State,
 } from "@elizaos/core";
-import { formatEther, parseEther, type Hex } from "viem";
+import {
+    formatEther,
+    formatUnits,
+    parseEther,
+    parseUnits,
+    type Hex,
+} from "viem";
 
 import { initWalletProvider, WalletProvider } from "../providers/wallet";
 import { transferTemplate } from "../templates";
@@ -46,16 +52,14 @@ export class TransferAction {
             if (!params.token || params.token == nativeToken) {
                 // Native token transfer
                 if (!params.amount) {
-                    const balance = await this.walletProvider.getWalletBalance(
+                    const publicClient = this.walletProvider.getPublicClient(
                         params.chain
                     );
-                    if (!balance) {
-                        throw new Error("Failed to get wallet balance");
-                    }
-                    const value =
-                        parseEther(balance) -
-                        this.BSC_DEFAULT_GAS_PRICE * 21000n;
+                    const balance = await publicClient.getBalance({
+                        address: fromAddress,
+                    });
 
+                    const value = balance - this.BSC_DEFAULT_GAS_PRICE * 21000n;
                     const hash = await walletClient.sendTransaction({
                         account: walletClient.account!,
                         to: params.toAddress,
@@ -83,7 +87,7 @@ export class TransferAction {
                     });
 
                     resp.txHash = hash;
-                    resp.amount = formatEther(value);
+                    resp.amount = params.amount;
                 }
             } else {
                 // ERC20 token transfer
@@ -105,6 +109,11 @@ export class TransferAction {
                 const publicClient = this.walletProvider.getPublicClient(
                     params.chain
                 );
+                const decimals = await publicClient.readContract({
+                    address: tokenAddress as `0x${string}`,
+                    abi: ERC20Abi,
+                    functionName: "decimals",
+                });
 
                 let value: bigint;
                 if (!params.amount) {
@@ -115,7 +124,7 @@ export class TransferAction {
                         args: [fromAddress],
                     });
                 } else {
-                    value = parseEther(params.amount);
+                    value = parseUnits(params.amount, decimals);
                 }
 
                 const { request } = await publicClient.simulateContract({
@@ -129,7 +138,7 @@ export class TransferAction {
                 const hash = await walletClient.writeContract(request);
 
                 resp.txHash = hash;
-                resp.amount = formatEther(value);
+                resp.amount = formatUnits(value, decimals);
             }
 
             return resp;

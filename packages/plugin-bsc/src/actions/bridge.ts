@@ -8,7 +8,14 @@ import {
     type Memory,
     type State,
 } from "@elizaos/core";
-import { formatEther, Hex, parseEther, getContract, Address } from "viem";
+import {
+    formatEther,
+    Hex,
+    parseEther,
+    getContract,
+    Address,
+    parseUnits,
+} from "viem";
 
 import { initWalletProvider, WalletProvider } from "../providers/wallet";
 import { bridgeTemplate } from "../templates";
@@ -69,8 +76,19 @@ export class BridgeAction {
             const nativeTokenBridge =
                 !params.fromToken || params.fromToken == nativeToken;
 
+            let amount: bigint;
+            if (nativeTokenBridge) {
+                amount = parseEther(params.amount);
+            } else {
+                const decimals = await publicClient.readContract({
+                    address: params.fromToken!,
+                    abi: ERC20Abi,
+                    functionName: "decimals",
+                });
+                amount = parseUnits(params.amount, decimals);
+            }
+
             let hash: Hex;
-            const amount = parseEther(params.amount);
             if (params.fromChain == "bsc" && params.toChain == "opBNB") {
                 // from L1 to L2
                 const l1BridgeContract = getContract({
