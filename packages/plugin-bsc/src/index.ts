@@ -10,6 +10,7 @@ import { bscWalletProvider } from "./providers/wallet";
 import { getBalanceAction } from "./actions/getBalance";
 import { bridgeAction } from "./actions/bridge";
 import { faucetAction } from "./actions/faucet";
+import { stakeAction } from "./actions/stake";
 
 export const bscPlugin: Plugin = {
     name: "bsc",
@@ -23,6 +24,7 @@ export const bscPlugin: Plugin = {
         swapAction,
         bridgeAction,
         faucetAction,
+        stakeAction,
     ],
 };
 

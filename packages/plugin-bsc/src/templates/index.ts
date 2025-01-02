@@ -119,3 +119,29 @@ Respond with a JSON markdown block containing only the extracted values. All fie
 }
 \`\`\`
 `;
+
+export const stakeTemplate = `Given the recent messages and wallet information below:
+
+{{recentMessages}}
+
+{{walletInfo}}
+
+Extract the following information about the requested stake action:
+- Action to execute. Must be one of ["stake", "unstake", "restake", "claim"].
+- Amount to execute. Must be a string representing the amount in ether (only number without coin symbol, e.g., "0.1")
+- From validator address. Optional, must be a valid Ethereum address starting with "0x". Required for "unstake" "claim" and "restake".
+- To validator address. Optional, must be a valid Ethereum address starting with "0x". Required for "stake" and "restake".
+- Delegate vote power. Optional, must be a boolean. Required for "stake" and "restake". Default is true.
+
+Respond with a JSON markdown block containing only the extracted values:
+
+\`\`\`json
+{
+    "action": "stake" | "unstake" | "restake" | "claim",
+    "amount": string,
+    "fromValidator": string | null,
+    "toValidator": string | null,
+    "delegateVotePower": boolean | null
+}
+\`\`\`
+`;
