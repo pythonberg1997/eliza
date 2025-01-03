@@ -39,6 +39,11 @@ export interface BridgeParams {
     toAddress?: Address;
 }
 
+export interface FaucetParams {
+    chain: SupportedChain;
+    toAddress: Address;
+}
+
 // Action return types
 export interface GetBalanceResponse {
     chain: SupportedChain;
