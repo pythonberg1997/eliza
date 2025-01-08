@@ -321,17 +321,16 @@ export const bridgeAction = {
             modelClass: ModelClass.LARGE,
         });
 
+        const walletProvider = initWalletProvider(runtime);
+        const action = new BridgeAction(walletProvider);
         const paramOptions: BridgeParams = {
             fromChain: content.fromChain,
             toChain: content.toChain,
             fromToken: content.fromToken,
             toToken: content.toToken,
             amount: content.amount,
-            toAddress: content.toAddress,
+            toAddress: await walletProvider.formatAddress(content.toAddress),
         };
-
-        const walletProvider = initWalletProvider(runtime);
-        const action = new BridgeAction(walletProvider);
         try {
             const bridgeResp = await action.bridge(paramOptions);
             callback?.({
